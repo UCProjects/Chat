@@ -11,7 +11,7 @@
     "local": "node localStart.js"
   },
   "dependencies": {
-    "axios": "0.21.1",
+    "axios": "0.21.2",
     "eris": "^0.13.3",
     "express": "^4.18.2",
     "firebase-admin": "^9.3.0",
