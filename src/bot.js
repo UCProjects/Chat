@@ -35,7 +35,9 @@ const alertRole =process.env.ALERT_ROLE;
 const _REPORTS_ = databaseValue('config/undercards/endpoints/reports');
 
 const undercards = new Undercards(process.env.LOGINBODY);
-const discord = new Eris.CommandClient(process.env.DISCORD_BOT_TOKEN, {}, {
+const discord = new Eris.CommandClient(process.env.DISCORD_BOT_TOKEN, {
+  intents: ['allNonPrivileged', 'messageContent'],
+}, {
   prefix: ['@mention', '~'],
 });
 
@@ -182,7 +184,8 @@ async function isAuthorized(guildID, uid) {
   return member.roles.some((id) => commandRequirements.roleIDs.includes(id));
 }
 
-discord.on('messageReactionAdd', async (msg, emoji, uid) => {
+discord.on('messageReactionAdd', async (msg, emoji, reactor) => {
+  const uid = reactor.id;
   if (discord.user.id === uid) return;
   const options = candidateMessages.get(msg.id);
   if (!options || !options.has(emoji.name)) return;
@@ -196,7 +199,8 @@ discord.on('messageReactionAdd', async (msg, emoji, uid) => {
   }
 });
 
-discord.on('messageReactionAdd', (msg, emoji, uid) => {
+discord.on('messageReactionAdd', (msg, emoji, reactor) => {
+  const uid = reactor.id;
   if (discord.user.id === uid) return; // Ignore self
   const data = pending.get(msg.id);
   if (!data) return;
