@@ -7,4 +7,8 @@ admin.initializeApp({
   storageBucket: `undercards-chat.appspot.com`,
 });
 
+if (process.env.DEBUG === 'true') {
+  admin.database.enableLogging(true);
+}
+
 module.exports = admin;
