@@ -22,6 +22,11 @@ const reportLimits = new Limiter({
 const reconnection = {
   delay: 0,
   timeout: null,
+  attempts: 0,
+  maxNotified: false,
+  stableTimeout: null,
+  maxDelay: 60 * 60 * 1000,
+  stableAfter: 30000,
 };
 const _INFO_ = {
   chan: process.env.CHANNEL_INFO,
@@ -90,22 +95,22 @@ async function uploadEmoji(key, override) {
   const image = `data:${mime};base64,${Buffer.from(data).toString('base64')}`;
   const name = emojiName(key, override);
 
+  const skipped = [];
   for (const guildID of emojiGuilds) {
+    if (!discord.guilds.has(guildID)) {
+      skipped.push(`${guildID} (bot is not in this guild)`);
+      continue;
+    }
     try {
       return await discord.createGuildEmoji(guildID, { name, image }, `Registered for ${key}`);
     } catch (err) {
       if (!emojiLimitCodes.includes(err.code)) throw err;
-  const skipped = [];
-    }
-    if (!discord.guilds.has(guildID)) {
-      skipped.push(`${guildID} (bot is not in this guild)`);
-      continue;
+      skipped.push(`${guildID} (no emoji slots left)`);
     }
   }
   throw new Error(`No guild could take the emoji: ${skipped.join(', ')}`);
 }
 
-      skipped.push(`${guildID} (no emoji slots left)`);
 const pending = new Map();
 const emotes = discord.registerCommand('emotes', (msg, args) => {
   const run = !!args.length;
@@ -241,6 +246,12 @@ function getSendStatus() {
   return sendStatus;
 }
 
+function backoff(base) {
+  const delay = Math.min(base * 2 ** reconnection.attempts, reconnection.maxDelay);
+  reconnection.attempts++;
+  return delay;
+}
+
 function reconnectUC(delay = 0) {
   if (undercards.connected) return;
   const now = Date.now();
@@ -277,6 +288,12 @@ function cleanString(string) {
 
 // TODO: Modularize message handlers
 undercards.on('connect', () => { // Join rooms
+  clearTimeout(reconnection.stableTimeout);
+  reconnection.stableTimeout = setTimeout(() => {
+    reconnection.attempts = 0;
+    reconnection.maxNotified = false;
+  }, reconnection.stableAfter);
+
   getSendStatus()();
 
   discord.editStatus('online');
@@ -322,6 +339,7 @@ undercards.on('connect', () => { // Join rooms
     post(endpoint, message);
   }
 }).on('disconnect', () => {
+  clearTimeout(reconnection.stableTimeout);
   getSendStatus()({
     message: 'Socket Closed',
   });
@@ -329,19 +347,40 @@ undercards.on('connect', () => { // Join rooms
   // We can technically try and reconnect here
   if (process.exitCode === undefined) {
     discord.editStatus('idle');
-    reconnectUC(500);
+    reconnectUC(backoff(500));
   }
 }).on('error', (err) => {
   console.error('Connection error:', err);
 }).on('error/login', (res) => {
-  console.error('Server unavailable:', res && (res.statusCode || res.message) || res);
+  const reason = res && (res.statusCode || res.message) || res;
+  console.error('Server unavailable:', reason);
   // TODO: Add restart flag
-  // Retry connection after 5 seconds
-  reconnectUC(5000);
+  const first = reconnection.attempts === 0;
+  const delay = backoff(5000);
+  const maxed = delay >= reconnection.maxDelay && !reconnection.maxNotified;
+  console.error(`Retrying in ${Math.round(delay / 1000)}s`);
+  reconnectUC(delay);
   discord.editStatus('idle');
+
+  if (maxed) {
+    reconnection.maxNotified = true;
+    getSendStatus()({
+      message: `Still unable to log in (${reason}). Backoff has reached its maximum, retrying every ${Math.round(delay / 60000)} minutes.`,
+      extended: false,
+    });
+  } else if (first) {
+    getSendStatus()({
+      message: `Unable to log in (${reason}). Retrying with increasing delays.`,
+      extended: false,
+    });
+  }
 }).on('error/timeout', () => {
   console.error('Timeout occurred: Please check login credentials');
   discord.editStatus('idle');
+  getSendStatus()({
+    message: 'Timeout occurred: please check login credentials.',
+    extended: false,
+  });
 }).on('message/getPrivateMessage', (data) => { // TODO: Handle private messages
   console.log('[PM]', JSON.stringify(data));
 });
