@@ -95,11 +95,17 @@ async function uploadEmoji(key, override) {
       return await discord.createGuildEmoji(guildID, { name, image }, `Registered for ${key}`);
     } catch (err) {
       if (!emojiLimitCodes.includes(err.code)) throw err;
+  const skipped = [];
+    }
+    if (!discord.guilds.has(guildID)) {
+      skipped.push(`${guildID} (bot is not in this guild)`);
+      continue;
     }
   }
-  throw new Error('No emoji slots available');
+  throw new Error(`No guild could take the emoji: ${skipped.join(', ')}`);
 }
 
+      skipped.push(`${guildID} (no emoji slots left)`);
 const pending = new Map();
 const emotes = discord.registerCommand('emotes', (msg, args) => {
   const run = !!args.length;
