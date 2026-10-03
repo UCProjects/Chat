@@ -1,6 +1,7 @@
 const { EventEmitter } = require('events');
 const WebSocket = require("ws");
 const login = require('./login');
+const agent = require('./agent');
 const parse = require('./parseMessage');
 const throttle = require('../util/throttle');
 
@@ -46,7 +47,7 @@ class Connection extends EventEmitter {
     login(this._login).then(({ headers }) => {
       const auth = headers['set-cookie'].map(cookie => cookie.split(";")[0]).join("; ") + ";";
 
-      const ws = this._ws = new WebSocket("wss://undercards.net/chat", { headers: { Cookie: auth } });
+      const ws = this._ws = new WebSocket("wss://undercards.net/chat", { headers: { Cookie: auth }, agent });
 
       // Wait a bit before timing out
       const timeout = setTimeout(() => {

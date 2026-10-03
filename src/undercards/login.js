@@ -1,4 +1,5 @@
 const https = require("https");
+const agent = require('./agent');
 
 function login(body) {
   const hostname = 'undercards.net';
@@ -7,6 +8,7 @@ function login(body) {
     port: 443,
     path: encodeURI('/SignIn'),
     method: "POST",
+    agent,
     headers: {
       Accept: "*/*",
       "Accept-Encoding": "gzip, deflate, br",
