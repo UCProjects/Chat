@@ -338,7 +338,7 @@ undercards.on('connect', () => { // Join rooms
 }).on('error', (err) => {
   console.error('Connection error:', err);
 }).on('error/login', (res) => {
-  console.error('Server unavailable');
+  console.error('Server unavailable:', res && (res.statusCode || res.message) || res);
   // TODO: Add restart flag
   // Retry connection after 5 seconds
   reconnectUC(5000);

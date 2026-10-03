@@ -45,6 +45,7 @@ class Connection extends EventEmitter {
     if (this.connected) return;
     this._connected = true;
     login(this._login).then(({ headers }) => {
+      if (!headers['set-cookie']) throw new Error('Login rejected: no session cookie (captcha or bad credentials?)');
       const auth = headers['set-cookie'].map(cookie => cookie.split(";")[0]).join("; ") + ";";
 
       const ws = this._ws = new WebSocket("wss://undercards.net/chat", { headers: { Cookie: auth }, agent });

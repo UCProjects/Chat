@@ -29,7 +29,7 @@ function login(body) {
         reject(res);
       } else resolve(res)
     });
-    //req.on("error", console.error.bind(console));
+    req.on('error', reject);
     if (body) req.write(body);
     req.end();
   });
