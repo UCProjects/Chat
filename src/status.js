@@ -1,4 +1,5 @@
 const axios = require("axios");
+const Eris = require('eris');
 const prettyDuration = require('pretty-ms');
 const stats = require('./stats');
 const bot = require('./bot');
@@ -13,15 +14,24 @@ const _endpoint = {
   chan: process.env.CHANNEL_STATUS,
 };
 
-const pngReactions = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣'];
-const gifReactions = ['🇦', '🇧', '🇨', '🇩', '🇪'];
-
 const popular = stats.counters('emoji');
 const missing = stats.counters('emojiMissing');
 const missingGif = stats.counters('emojiMissingAnimated');
 
 let safeExit = false;
 let interval;
+
+function candidateRow(candidates) {
+  return {
+    type: Eris.Constants.ComponentTypes.ACTION_ROW,
+    components: candidates.map(({ name }) => ({
+      type: Eris.Constants.ComponentTypes.BUTTON,
+      style: Eris.Constants.ButtonStyles.SECONDARY,
+      label: name.substring(0, 80),
+      custom_id: `emote:${name}`.substring(0, 100),
+    })),
+  };
+}
 
 function sendStatus({
   shuttingDown = false,
@@ -35,7 +45,7 @@ function sendStatus({
   safeExit = shuttingDown;
 
   const embed = { fields: [] };
-  const candidates = [];
+  const components = [];
 
   if (message) embed.description = message;
   
@@ -56,15 +66,11 @@ function sendStatus({
       stat('Top Emoji', popular.top(5).map((a) => `${emoji[a.name] || a.name} x${a.get()}`).join('\n'));
       stat('Least Used Emoji', popular.last(5).map((a) => `${a.name} x${a.get()}`).join('\n'));
     }
-    const pngCandidates = missing.top(5);
-    const gifCandidates = missingGif.top(5);
-    const candidateLine = (a, label) => `${label} [${a.name}](${emojiURI}${a.name}) x${a.get()}`;
-    stat('Upload Candidates (png)', pngCandidates.map((a, i) => candidateLine(a, pngReactions[i])).join('\n'));
-    stat('Upload Candidates (gif)', gifCandidates.map((a, i) => candidateLine(a, gifReactions[i])).join('\n'));
-    candidates.push(
-      ...pngCandidates.map((a, i) => ({ reaction: pngReactions[i], key: a.name })),
-      ...gifCandidates.map((a, i) => ({ reaction: gifReactions[i], key: a.name })),
-    );
+    [['png', missing], ['gif', missingGif]].forEach(([type, counter]) => {
+      const top = counter.top(5);
+      stat(`Upload Candidates (${type})`, top.map((a) => `[${a.name}](${emojiURI}${a.name}) x${a.get()}`).join('\n'));
+      if (top.length) components.push(candidateRow(top));
+    });
   }
   
   // TODO: More stats
@@ -74,10 +80,8 @@ function sendStatus({
   return bot.post(endpoint, {
     avatar_url: "https://undercards.net/images/souls/DETERMINATION.png",
     embed,
-  }).then((res) => {
-    if (res && res.id) bot.watchCandidates(res, candidates);
-    return true;
-  });
+    components,
+  }).then(() => true);
 }
 
 process.on('exit', unexpectedTermination);

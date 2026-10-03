@@ -164,36 +164,26 @@ emotes.registerSubcommand('add', (msg, args) => {
   usage: '<key or url> [name]',
 });
 
-const candidateMessages = new Map();
-const maxCandidateMessages = 10;
+const candidatePrefix = 'emote:';
 
-function watchCandidates(message, reactions) {
-  if (!message || !message.id || !reactions.length) return;
-  candidateMessages.set(message.id, new Map(reactions.map(({ reaction, key }) => [reaction, key])));
-  if (candidateMessages.size > maxCandidateMessages) {
-    candidateMessages.delete(candidateMessages.keys().next().value);
-  }
-  reactions.reduce((chain, { reaction }) => chain.then(() => message.addReaction(reaction)), Promise.resolve())
-    .catch(console.error);
+function isAuthorized(member) {
+  return !!member && (
+    commandRequirements.userIDs.includes(member.id)
+    || member.roles.some((id) => commandRequirements.roleIDs.includes(id))
+  );
 }
 
-async function isAuthorized(guildID, uid) {
-  if (commandRequirements.userIDs.includes(uid)) return true;
-  if (!guildID) return false;
-  const member = await discord.getRESTGuildMember(guildID, uid);
-  return member.roles.some((id) => commandRequirements.roleIDs.includes(id));
-}
-
-discord.on('messageReactionAdd', async (msg, emoji, reactor) => {
-  const uid = reactor.id;
-  if (discord.user.id === uid) return;
-  const options = candidateMessages.get(msg.id);
-  if (!options || !options.has(emoji.name)) return;
+discord.on('interactionCreate', async (interaction) => {
+  if (!(interaction instanceof Eris.ComponentInteraction)) return;
+  const id = interaction.data.custom_id || '';
+  if (!id.startsWith(candidatePrefix)) return;
 
   try {
-    if (!await isAuthorized(msg.channel.guild && msg.channel.guild.id, uid)) return;
-    const result = await addEmote(options.get(emoji.name));
-    await discord.createMessage(msg.channel.id, result);
+    if (!isAuthorized(interaction.member)) {
+      return await interaction.createMessage({ content: 'Not allowed', flags: Eris.Constants.MessageFlags.EPHEMERAL });
+    }
+    await interaction.defer();
+    await interaction.editOriginalMessage(await addEmote(id.substring(candidatePrefix.length)));
   } catch (err) {
     console.error(err);
   }
@@ -439,7 +429,6 @@ function isReport(message) {
 module.exports = {
   undercards,
   discord,
-  watchCandidates,
   connected: () => {
     return undercards.connected;
   },
