@@ -1,3 +1,4 @@
+const axios = require('axios');
 const Eris = require('eris');
 const chatRecord = require('./util/chat-record');
 const EMOJI = require('./discordEmoji');
@@ -28,7 +29,8 @@ const _INFO_ = {
 const _MUTE_ = {
   chan: process.env.CHANNEL_MUTED,
 };
-const alertRole = process.env.ALERT_ROLE;
+const emojiURI = 'https://undercards.net/images/emotes/';
+const alertRole =process.env.ALERT_ROLE;
 
 const _REPORTS_ = databaseValue('config/undercards/endpoints/reports');
 
@@ -48,8 +50,56 @@ const commandRequirements = {
 
 discord.on('error', (err) => console.log(err.code ? `Error: ${err.code}${err.message?`: ${err.message}`:''}` : err));
 
+const emojiGuilds = [
+  '797805263658418196', // emote server
+  '703480379545354261', // main server
+];
+const emojiMimeTypes = {
+  png: 'image/png',
+  gif: 'image/gif',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+};
+const emojiLimitCodes = [30008, 30018];
+
+function emoteKey(input = '') {
+  return input.split(/[?#]/)[0].split('/').pop();
+}
+
+function emojiName(key, override) {
+  const base = override || key.substring(0, key.lastIndexOf('.'));
+  return base.replace(/[^\w]/g, '_').padEnd(2, '_').substring(0, 32);
+}
+
+function registerEmoji(key, { id, name, animated }) {
+  return firebase.database().ref(`config/undercards/emoji/${key.replace('.', '_')}`).set({
+    id,
+    name,
+    animated: !!animated,
+  });
+}
+
+async function uploadEmoji(key, override) {
+  const extension = key.substring(key.lastIndexOf('.') + 1).toLowerCase();
+  const mime = emojiMimeTypes[extension];
+  if (!mime) throw new Error(`Unsupported extension \`${extension}\``);
+
+  const { data } = await axios.get(`${emojiURI}${encodeURIComponent(key)}`, { responseType: 'arraybuffer' });
+  const image = `data:${mime};base64,${Buffer.from(data).toString('base64')}`;
+  const name = emojiName(key, override);
+
+  for (const guildID of emojiGuilds) {
+    try {
+      return await discord.createGuildEmoji(guildID, { name, image }, `Registered for ${key}`);
+    } catch (err) {
+      if (!emojiLimitCodes.includes(err.code)) throw err;
+    }
+  }
+  throw new Error('No emoji slots available');
+}
+
 const pending = new Map();
-discord.registerCommand('emotes', (msg, args) => {
+const emotes = discord.registerCommand('emotes', (msg, args) => {
   const run = !!args.length;
   const tempKey = args[0] || '';
   const url = tempKey.lastIndexOf('/') + 1;
@@ -86,6 +136,66 @@ discord.registerCommand('emotes', (msg, args) => {
   requirements: commandRequirements,
 });
 
+async function addEmote(input, name) {
+  const key = emoteKey(input);
+  if (key.lastIndexOf('.') === -1) return 'Missing emote extension';
+
+  const existing = EMOJI[key];
+  if (existing) return `\`${key}\` registered to ${existing}`;
+
+  try {
+    const emoji = await uploadEmoji(key, name);
+    await registerEmoji(key, emoji);
+    return `Registered <${emoji.animated ? 'a' : ''}:${emoji.name}:${emoji.id}> for \`${key}\``;
+  } catch (err) {
+    console.error(err);
+    return `Failed to add \`${key}\`: ${err.message}`;
+  }
+}
+
+emotes.registerSubcommand('add', (msg, args) => {
+  if (!args.length) return 'Usage: `~emotes add <key or url> [name]`';
+  return addEmote(args[0], args[1]);
+}, {
+  requirements: commandRequirements,
+  description: 'Upload an undercards emote to Discord and register it',
+  usage: '<key or url> [name]',
+});
+
+const candidateMessages = new Map();
+const maxCandidateMessages = 10;
+
+function watchCandidates(message, reactions) {
+  if (!message || !message.id || !reactions.length) return;
+  candidateMessages.set(message.id, new Map(reactions.map(({ reaction, key }) => [reaction, key])));
+  if (candidateMessages.size > maxCandidateMessages) {
+    candidateMessages.delete(candidateMessages.keys().next().value);
+  }
+  reactions.reduce((chain, { reaction }) => chain.then(() => message.addReaction(reaction)), Promise.resolve())
+    .catch(console.error);
+}
+
+async function isAuthorized(guildID, uid) {
+  if (commandRequirements.userIDs.includes(uid)) return true;
+  if (!guildID) return false;
+  const member = await discord.getRESTGuildMember(guildID, uid);
+  return member.roles.some((id) => commandRequirements.roleIDs.includes(id));
+}
+
+discord.on('messageReactionAdd', async (msg, emoji, uid) => {
+  if (discord.user.id === uid) return;
+  const options = candidateMessages.get(msg.id);
+  if (!options || !options.has(emoji.name)) return;
+
+  try {
+    if (!await isAuthorized(msg.channel.guild && msg.channel.guild.id, uid)) return;
+    const result = await addEmote(options.get(emoji.name));
+    await discord.createMessage(msg.channel.id, result);
+  } catch (err) {
+    console.error(err);
+  }
+});
+
 discord.on('messageReactionAdd', (msg, emoji, uid) => {
   if (discord.user.id === uid) return; // Ignore self
   const data = pending.get(msg.id);
@@ -95,11 +205,7 @@ discord.on('messageReactionAdd', (msg, emoji, uid) => {
   pending.delete(msg.id);
 
   msg.removeReactions(); // Remove reactions immediately
-  firebase.database().ref(`config/undercards/emoji/${data.key.replace('.', '_')}`).set({
-    id: emoji.id,
-    name: emoji.name,
-    animated: emoji.animated,
-  }).then(() =>
+  registerEmoji(data.key, emoji).then(() =>
     msg.edit(`Registered <${emoji.animated?'a':''}:${emoji.name}:${emoji.id}> for \`${data.key}\``)
   ).catch(console.error);
 });
@@ -329,6 +435,7 @@ function isReport(message) {
 module.exports = {
   undercards,
   discord,
+  watchCandidates,
   connected: () => {
     return undercards.connected;
   },

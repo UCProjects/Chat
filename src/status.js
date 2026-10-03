@@ -13,6 +13,9 @@ const _endpoint = {
   chan: process.env.CHANNEL_STATUS,
 };
 
+const pngReactions = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣'];
+const gifReactions = ['🇦', '🇧', '🇨', '🇩', '🇪'];
+
 const popular = stats.counters('emoji');
 const missing = stats.counters('emojiMissing');
 const missingGif = stats.counters('emojiMissingAnimated');
@@ -32,7 +35,8 @@ function sendStatus({
   safeExit = shuttingDown;
 
   const embed = { fields: [] };
-  
+  const candidates = [];
+
   if (message) embed.description = message;
   
   function stat(name, value, inline = true) {
@@ -52,8 +56,15 @@ function sendStatus({
       stat('Top Emoji', popular.top(5).map((a) => `${emoji[a.name] || a.name} x${a.get()}`).join('\n'));
       stat('Least Used Emoji', popular.last(5).map((a) => `${a.name} x${a.get()}`).join('\n'));
     }
-    stat('Upload Candidates (png)', missing.top(5).map((a) => `[${a.name}](${emojiURI}${a.name}) x${a.get()}`).join('\n'));
-    stat('Upload Candidates (gif)', missingGif.top(5).map((a) => `[${a.name}](${emojiURI}${a.name}) x${a.get()}`).join('\n'));
+    const pngCandidates = missing.top(5);
+    const gifCandidates = missingGif.top(5);
+    const candidateLine = (a, label) => `${label} [${a.name}](${emojiURI}${a.name}) x${a.get()}`;
+    stat('Upload Candidates (png)', pngCandidates.map((a, i) => candidateLine(a, pngReactions[i])).join('\n'));
+    stat('Upload Candidates (gif)', gifCandidates.map((a, i) => candidateLine(a, gifReactions[i])).join('\n'));
+    candidates.push(
+      ...pngCandidates.map((a, i) => ({ reaction: pngReactions[i], key: a.name })),
+      ...gifCandidates.map((a, i) => ({ reaction: gifReactions[i], key: a.name })),
+    );
   }
   
   // TODO: More stats
@@ -63,7 +74,10 @@ function sendStatus({
   return bot.post(endpoint, {
     avatar_url: "https://undercards.net/images/souls/DETERMINATION.png",
     embed,
-  }).then(() => true);
+  }).then((res) => {
+    if (res && res.id) bot.watchCandidates(res, candidates);
+    return true;
+  });
 }
 
 process.on('exit', unexpectedTermination);
