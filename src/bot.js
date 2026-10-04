@@ -2,6 +2,7 @@ const axios = require('axios');
 const Eris = require('eris');
 const chatRecord = require('./util/chat-record');
 const EMOJI = require('./discordEmoji');
+const { prepareEmoteImage } = require('./emoteImage');
 const { endpoints, autoTemplates } = require('./endpoints');
 const firebase = require('./firebase');
 const getMessage = require('./getMessage');
@@ -68,6 +69,7 @@ const emojiMimeTypes = {
   jpeg: 'image/jpeg',
 };
 const emojiLimitCodes = [30008, 30018];
+const emojiMaxBytes = 256 * 1024;
 
 function emoteKey(input = '') {
   return input.split(/[?#]/)[0].split('/').pop();
@@ -92,7 +94,11 @@ async function uploadEmoji(key, override) {
   if (!mime) throw new Error(`Unsupported extension \`${extension}\``);
 
   const { data } = await axios.get(`${emojiURI}${encodeURIComponent(key)}`, { responseType: 'arraybuffer' });
-  const image = `data:${mime};base64,${Buffer.from(data).toString('base64')}`;
+  const prepared = prepareEmoteImage(Buffer.from(data), mime);
+  if (prepared.buffer.length > emojiMaxBytes) {
+    throw new Error(`Image is ${Math.round(prepared.buffer.length / 1024)} KB, over Discord's ${emojiMaxBytes / 1024} KB limit`);
+  }
+  const image = `data:${prepared.mime};base64,${prepared.buffer.toString('base64')}`;
   const name = emojiName(key, override);
 
   const skipped = [];
